@@ -62,13 +62,16 @@ class TradeReportProcessor:
 
     def _normalize_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
+        # Убираем пробелы в начале и конце названий колонок
         df.columns = df.columns.str.strip()
         return df
 
     def load_broker_report(self) -> pd.DataFrame:
         logger.info('Загрузка брокерского отчёта: %s', self.broker_path)
         xls = pd.ExcelFile(self.broker_path, engine='openpyxl')
+        # Ищем лист, который название которого начинается 'Trades'
         sheet = next(s for s in xls.sheet_names if s.startswith('Trades'))
+        logger.info('Найден лист: %s', sheet)
         df = pd.read_excel(xls, sheet, engine='openpyxl')
         return self._normalize_columns(df)
 
@@ -87,9 +90,16 @@ class TradeReportProcessor:
     def preprocess(self):
         self.trades = self.load_broker_report()
         self.rates = self.load_currency_rates()
+        
+        # Логируем колонки для отладки
+        logger.info('Колонки в trades: %s', self.trades.columns.tolist())
+        
         if 'Валюта' in self.trades:
             self.trades['Валюта'] = self.trades['Валюта'].astype(str).str.strip()
             self.trades = self.trades[self.trades['Валюта'] == self.currency]
+            logger.info('Отфильтровано %d сделок в валюте %s', len(self.trades), self.currency)
+        else:
+            logger.warning('Колонка "Валюта" не найдена в данных')
 
     def merge_and_calculate(self):
         df = self.trades.copy()
@@ -98,7 +108,7 @@ class TradeReportProcessor:
         merged = pd.merge_asof(df.sort_values('Расчеты'), self.rates.sort_values('data'),
                                left_on='Расчеты', right_on='data', direction='backward')
         merged = merged.drop(columns=['data']).rename(columns={'curs': 'Курс'})
-        for col in ['Сумма', 'Комиссия', 'SMAT', 'Количество']:
+        for col in ['Сумма', 'Комиссия', 'Количество']:
             merged[col] = (merged[col].astype(str)
                            .str.replace(',', '.')
                            .str.replace(r"\s+", '', regex=True)
@@ -108,7 +118,6 @@ class TradeReportProcessor:
             return (-amount if row['Операция'] == 'Покупка' else amount).quantize(Decimal('0.01'))
         merged['Сумма в руб'] = merged.apply(calc_sum, axis=1)
         merged['Комиссия брокера руб'] = (merged['Комиссия'] * merged['Курс']).apply(lambda x: x.quantize(Decimal('0.01')))
-#        merged['Комиссия биржи руб'] = (merged['SMAT'] * merged['Курс']).apply(lambda x: x.quantize(Decimal('0.01')))
         merged['Итог в руб'] = (merged['Сумма в руб']
                                 - merged['Комиссия брокера руб']).apply(lambda x: x.quantize(Decimal('0.01')))
         self.processed = merged
@@ -122,6 +131,10 @@ class TradeReportProcessor:
         ).reset_index()
 
     def compute_closed_summary(self):
+        logger.info('Вычисление сводки по закрытым позициям')
+        logger.info('Количество позиций в summary: %d', len(self.summary))
+        logger.info('Позиции с нулевым сальдо: %d', len(self.summary[self.summary['Сальдо'] == 0]))
+        
         rows = []
         for _, r in self.summary[self.summary['Сальдо'] == 0].iterrows():
             grp = self.processed.loc[self.processed['Тикер'] == r['Тикер']]
@@ -132,17 +145,28 @@ class TradeReportProcessor:
             result = (sum_s - sum_p - sum_c).quantize(Decimal('0.01'))
             rows.append({'Тикер': r['Тикер'], 'Сумма покупок': sum_p,
                          'Сумма продаж': sum_s, 'Сумма комиссий': sum_c, 'Итог': result})
+        
         df_closed = pd.DataFrame(rows)
+        logger.info('Создано %d записей для закрытых позиций', len(df_closed))
+        
         if not df_closed.empty:
             tot = {col: df_closed[col].sum().quantize(Decimal('0.01')) for col in ['Сумма покупок','Сумма продаж','Сумма комиссий','Итог']}
             tot['Тикер'] = 'Итого'
             df_closed = pd.concat([df_closed, pd.DataFrame([tot])], ignore_index=True)
+            logger.info('Добавлена строка "Итого"')
+        
         self.closed_summary = df_closed
+        logger.info('Итоговый размер closed_summary: %d строк', len(self.closed_summary))
 
     def export_closed_pdf(self, output_file: Path):
         """
         Генерация PDF-отчёта по закрытым позициям в красивом формате с цветовой подсветкой.
         """
+        # Проверяем, есть ли данные для отчёта
+        if self.closed_summary.empty:
+            logger.warning('Нет данных для PDF отчёта - closed_summary пуст')
+            return
+            
         doc = SimpleDocTemplate(str(output_file), pagesize=A4)
         # Получаем базовые стили
         styles_raw = getSampleStyleSheet()
@@ -156,8 +180,15 @@ class TradeReportProcessor:
         heading_style.spaceAfter = 6
         heading_style.spaceBefore = 12
         elements = []
+        
+        # Проверяем, есть ли тикеры кроме "Итого"
+        tickers_to_process = self.closed_summary[self.closed_summary['Тикер'] != 'Итого']
+        if tickers_to_process.empty:
+            logger.warning('Нет тикеров для обработки в PDF отчёте')
+            return
+            
         # Раздел для каждого тикера
-        for ticker in self.closed_summary[self.closed_summary['Тикер'] != 'Итого']['Тикер']:
+        for ticker in tickers_to_process['Тикер']:
             elements.append(Paragraph(ticker, heading_style))
             grp = self.processed.loc[self.processed['Тикер'] == ticker].copy()
             grp['Операция'] = grp['Операция'].astype(str).str.strip()
