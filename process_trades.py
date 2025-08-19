@@ -417,15 +417,14 @@ class TradeReportProcessor:
         logger.info('Загрузка отчёта за прошлый период: %s', previous_report_path)
         
         try:
-            xls = pd.ExcelFile(previous_report_path, engine='openpyxl')
-            # Ищем лист с торговыми данными
-            trades_sheet = next((s for s in xls.sheet_names if 'Trades' in s), None)
+            # Определяем тип файла по расширению
+            if previous_report_path.suffix.lower() == '.pdf':
+                if not PDF_AVAILABLE:
+                    raise ValueError("Для обработки PDF файлов необходимо установить PyPDF2 или pypdf")
+                df = self._load_pdf_report_from_path(previous_report_path)
+            else:
+                df = self._load_excel_report_from_path(previous_report_path)
             
-            if not trades_sheet:
-                raise ValueError("В файле прошлого периода не найден лист с торговыми данными")
-            
-            logger.info('Найден лист: %s', trades_sheet)
-            df = pd.read_excel(xls, trades_sheet, engine='openpyxl')
             df = self._normalize_columns(df)
             
             # Фильтруем только покупки в USD
@@ -444,6 +443,50 @@ class TradeReportProcessor:
                 
         except Exception as e:
             logger.error('Ошибка при загрузке отчёта за прошлый период: %s', e)
+            raise
+
+    def _load_excel_report_from_path(self, file_path: Path) -> pd.DataFrame:
+        """Загружает Excel отчёт из указанного пути."""
+        xls = pd.ExcelFile(file_path, engine='openpyxl')
+        # Ищем лист с торговыми данными
+        trades_sheet = next((s for s in xls.sheet_names if 'Trades' in s), None)
+        
+        if not trades_sheet:
+            raise ValueError("В файле прошлого периода не найден лист с торговыми данными")
+        
+        logger.info('Найден лист: %s', trades_sheet)
+        df = pd.read_excel(xls, trades_sheet, engine='openpyxl')
+        return df
+
+    def _load_pdf_report_from_path(self, file_path: Path) -> pd.DataFrame:
+        """Загружает PDF отчёт из указанного пути."""
+        logger.info('Загрузка PDF отчёта прошлого периода')
+        
+        try:
+            # Читаем PDF файл
+            if 'PyPDF2' in globals():
+                with open(file_path, 'rb') as file:
+                    pdf_reader = PyPDF2.PdfReader(file)
+                    text = ""
+                    for page in pdf_reader.pages:
+                        text += page.extract_text()
+            else:
+                with open(file_path, 'rb') as file:
+                    pdf_reader = pypdf.PdfReader(file)
+                    text = ""
+                    for page in pdf_reader.pages:
+                        text += page.extract_text()
+            
+            logger.info('PDF файл прошлого периода успешно прочитан')
+            
+            # Парсим сделки из текста
+            trades = self._parse_pdf_trades(text)
+            logger.info('Извлечено %d сделок из PDF прошлого периода', len(trades))
+            
+            return trades
+            
+        except Exception as e:
+            logger.error('Ошибка при чтении PDF файла прошлого периода: %s', e)
             raise
 
     def process_negative_balance_with_previous_data(self, previous_trades: pd.DataFrame):
