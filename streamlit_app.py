@@ -7,7 +7,7 @@ import tempfile
 import os
 from decimal import Decimal
 import logging
-from process_trades import TradeReportProcessor
+from src.trade_report_processor import TradeReportProcessor
 
 # Настройка страницы
 st.set_page_config(
@@ -148,31 +148,24 @@ def main():
                 
                 # Обрабатываем отчёты
                 with st.spinner("Обработка отчётов..."):
-                    processor = TradeReportProcessor(broker_path, rates_path, currency)
+                    processor = TradeReportProcessor(broker_path, rates_path)
                     
                     # Основная обработка
-                    processor.preprocess()
-                    processor.merge_and_calculate()
-                    processor.aggregate_summary()
+                    processor.process()
                     
-                    # Проверяем отрицательное сальдо
-                    negative_tickers = processor.identify_negative_balance_tickers()
+                    # Проверяем отрицательный остаток
+                    negative_tickers = processor.negative_balance_handler.identify_negative_balance_tickers(processor.summary_df)
                     
                     if not negative_tickers.empty:
                         if previous_path:
-                            st.warning("Обнаружены тикеры с отрицательным сальдо. Обрабатываю данные прошлого периода...")
-                            previous_trades = processor.load_previous_period_report(previous_path)
-                            processor.process_negative_balance_with_previous_data(previous_trades)
-                            processor.recalculate_additional_trades()
-                            processor.aggregate_summary()
+                            st.warning("Обнаружены тикеры с отрицательным остатком. Обрабатываю данные прошлого периода...")
+                            processor.handle_negative_positions(previous_path)
                         else:
-                            st.warning("Обнаружены тикеры с отрицательным сальдо. Для корректного расчёта загрузите отчёт за прошлый период.")
-                    
-                    processor.compute_closed_summary()
+                            st.warning("Обнаружены тикеры с отрицательным остатком. Для корректного расчёта загрузите отчёт за прошлый период.")
                     
                     # Сохраняем результаты
                     output_dir = temp_path / "output"
-                    processor.save(output_dir)
+                    processor.save_reports(output_dir)
                 
                 # Отображаем результаты
                 display_results(processor, output_dir)
@@ -207,14 +200,14 @@ def display_results(processor, output_dir):
     with tab1:
         st.header("Общая сводка по всем позициям")
         
-        if not processor.summary.empty:
+        if not processor.summary_df.empty:
             # Метрики
             col1, col2, col3, col4 = st.columns(4)
             
-            total_tickers = len(processor.summary)
-            positive_balance = len(processor.summary[processor.summary['Сальдо'] > 0])
-            negative_balance = len(processor.summary[processor.summary['Сальдо'] < 0])
-            zero_balance = len(processor.summary[processor.summary['Сальдо'] == 0])
+            total_tickers = len(processor.summary_df)
+            positive_balance = len(processor.summary_df[processor.summary_df['Остаток'] > 0])
+            negative_balance = len(processor.summary_df[processor.summary_df['Остаток'] < 0])
+            zero_balance = len(processor.summary_df[processor.summary_df['Остаток'] == 0])
             
             with col1:
                 st.metric("Всего тикеров", total_tickers)
@@ -227,7 +220,7 @@ def display_results(processor, output_dir):
             
             # Таблица сводки
             st.dataframe(
-                processor.summary,
+                processor.summary_df,
                 use_container_width=True,
                 hide_index=True
             )
@@ -237,10 +230,10 @@ def display_results(processor, output_dir):
     with tab2:
         st.header("Сводка по закрытым позициям")
         
-        if not processor.closed_summary.empty:
+        if not processor.closed_summary_df.empty:
             # Итоговые метрики
-            if 'Итого' in processor.closed_summary['Тикер'].values:
-                total_row = processor.closed_summary[processor.closed_summary['Тикер'] == 'Итого'].iloc[0]
+            if 'Итого' in processor.closed_summary_df['Тикер'].values:
+                total_row = processor.closed_summary_df[processor.closed_summary_df['Тикер'] == 'Итого'].iloc[0]
                 
                 col1, col2, col3, col4 = st.columns(4)
                 
@@ -256,7 +249,7 @@ def display_results(processor, output_dir):
                     st.metric("Финансовый результат", f"{result:,.2f} ₽", delta=f"{result:,.2f}")
             
             # Таблица закрытых позиций
-            closed_data = processor.closed_summary[processor.closed_summary['Тикер'] != 'Итого']
+            closed_data = processor.closed_summary_df[processor.closed_summary_df['Тикер'] != 'Итого']
             if not closed_data.empty:
                 st.subheader("Детали по тикерам")
                 st.dataframe(
@@ -287,33 +280,33 @@ def display_results(processor, output_dir):
     with tab3:
         st.header("Детали всех сделок")
         
-        if not processor.processed.empty:
+        if not processor.processed_df.empty:
             # Фильтры
             col1, col2, col3 = st.columns(3)
             
             with col1:
                 ticker_filter = st.selectbox(
                     "Фильтр по тикеру",
-                    ["Все"] + sorted(processor.processed['Тикер'].unique().tolist())
+                    ["Все"] + sorted(processor.processed_df['Тикер'].unique().tolist())
                 )
             
             with col2:
                 operation_filter = st.selectbox(
                     "Фильтр по операции",
-                    ["Все"] + sorted(processor.processed['Операция'].unique().tolist())
+                    ["Все"] + sorted(processor.processed_df['Операция'].unique().tolist())
                 )
             
             with col3:
                 date_range = st.date_input(
                     "Период",
                     value=(
-                        processor.processed['Расчеты'].min().date(),
-                        processor.processed['Расчеты'].max().date()
+                        processor.processed_df['Расчеты'].min().date(),
+                        processor.processed_df['Расчеты'].max().date()
                     )
                 )
             
             # Применяем фильтры
-            filtered_data = processor.processed.copy()
+            filtered_data = processor.processed_df.copy()
             
             if ticker_filter != "Все":
                 filtered_data = filtered_data[filtered_data['Тикер'] == ticker_filter]
@@ -408,10 +401,10 @@ def display_results(processor, output_dir):
     with tab5:
         st.header("Визуализация данных")
         
-        if not processor.processed.empty:
+        if not processor.processed_df.empty:
             # График сделок по времени
             fig1 = px.scatter(
-                processor.processed,
+                processor.processed_df,
                 x='Расчеты',
                 y='Сумма в руб',
                 color='Операция',
@@ -422,7 +415,7 @@ def display_results(processor, output_dir):
             st.plotly_chart(fig1, use_container_width=True)
             
             # График распределения по тикерам
-            ticker_counts = processor.processed['Тикер'].value_counts().head(20)
+            ticker_counts = processor.processed_df['Тикер'].value_counts().head(20)
             fig2 = px.bar(
                 x=ticker_counts.index,
                 y=ticker_counts.values,
@@ -432,11 +425,11 @@ def display_results(processor, output_dir):
                 xaxis_title="Тикер",
                 yaxis_title="Количество сделок",
                 height=400
-            )
+                )
             st.plotly_chart(fig2, use_container_width=True)
             
             # Круговая диаграмма по операциям
-            operation_counts = processor.processed['Операция'].value_counts()
+            operation_counts = processor.processed_df['Операция'].value_counts()
             fig3 = px.pie(
                 values=operation_counts.values,
                 names=operation_counts.index,
