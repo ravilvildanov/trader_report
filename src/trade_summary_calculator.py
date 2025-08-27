@@ -18,7 +18,7 @@ class TradeSummaryCalculator:
         
         summary = df.groupby('Тикер').agg(
             Остаток=('Кол-во signed', 'sum'),
-            Финансовый_результат_в_руб=('Итог в руб', lambda s: sum(s).quantize(Decimal('0.01')))
+            Финансовый_результат_в_руб=('Итог в руб', lambda s: sum(s.dropna()).quantize(Decimal('0.01')) if s.notna().any() else Decimal('0.00'))
         ).reset_index()
         
         return summary

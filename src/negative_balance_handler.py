@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+from decimal import Decimal
 import pandas as pd
 from .data_loaders import DataLoaderFactory
 
@@ -102,8 +103,8 @@ class NegativeBalanceHandler:
                     'Количество': amount_to_use,
                     'Цена': buy_row['Цена'],
                     'Валюта': buy_row['Валюта'],
-                    'Сумма': buy_row['Сумма'] * (amount_to_use / available_amount),
-                    'Комиссия': buy_row.get('Комиссия', 0) * (amount_to_use / available_amount),
+                    'Сумма': (Decimal(str(buy_row['Сумма'])) * Decimal(str(amount_to_use)) / Decimal(str(available_amount))).quantize(Decimal('0.01')),
+                    'Комиссия': (Decimal(str(buy_row.get('Комиссия', 0))) * Decimal(str(amount_to_use)) / Decimal(str(available_amount))).quantize(Decimal('0.01')),
                     'Валюта комиссии': buy_row.get('Валюта комиссии', 'USD'),
                     'Дата сделки': buy_row['Дата сделки'],
                     'Расчеты': buy_row['Расчеты'],
@@ -116,7 +117,7 @@ class NegativeBalanceHandler:
                 additional_trades.append(additional_trade)
                 covered_amount += amount_to_use
                 
-                logger.info('  Покрыто %d бумаг из покупки %s по цене %s',
+                logger.info('Покрыто %d бумаг из покупки %s по цене %s',
                           amount_to_use, buy_row['Расчеты'].strftime('%Y-%m-%d'), buy_row['Цена'])
         
         if additional_trades:

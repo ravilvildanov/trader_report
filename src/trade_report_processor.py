@@ -135,6 +135,11 @@ class TradeReportProcessor:
                           row['Тикер'], rate, sum_in_rub)
             else:
                 logger.warning('Не найден курс валюты для сделки %s от %s', row['Тикер'], trade_date)
+                # Устанавливаем значения по умолчанию для сделок без курса
+                self.processed_df.loc[idx, 'Курс'] = 0
+                self.processed_df.loc[idx, 'Сумма в руб'] = 0
+                self.processed_df.loc[idx, 'Комиссия брокера руб'] = 0
+                self.processed_df.loc[idx, 'Итог в руб'] = 0
     
     def save_reports(self, output_dir: Path):
         """Сохраняет все отчёты."""

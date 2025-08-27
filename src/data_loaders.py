@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any
+from decimal import Decimal
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -150,11 +151,11 @@ class PDFDataLoader(DataLoader):
         """Создаёт запись о сделке из частей строки."""
         ticker = parts[0]
         operation = self._normalize_operation(parts[1])
-        price = float(parts[2].replace(',', '.'))
+        price = Decimal(parts[2].replace(',', '.'))
         quantity = abs(int(parts[3].replace(',', '')))
-        amount = float(parts[4].replace(',', ''))
-        broker_commission = float(parts[5].replace(',', '.'))
-        exchange_commission = float(parts[6].replace(',', '.'))
+        amount = Decimal(parts[4].replace(',', ''))
+        broker_commission = Decimal(parts[5].replace(',', '.'))
+        exchange_commission = Decimal(parts[6].replace(',', '.'))
         
         # Последние 4 части: Путь Место Дата Время
         path = parts[-4]
@@ -168,6 +169,9 @@ class PDFDataLoader(DataLoader):
         date_part, time_part = date_time.split(' ')
         day, month, year = date_part.split('.')
         date_obj = pd.to_datetime(f"{year}-{month}-{day} {time_part}")
+
+        # Добавляем место к тикеру как в новых отчетах
+        ticker = f"{ticker}.{place}"
         
         return {
             'Тикер': ticker,
@@ -176,7 +180,7 @@ class PDFDataLoader(DataLoader):
             'Цена': price,
             'Валюта': 'USD',
             'Сумма': abs(amount),
-            'Комиссия': broker_commission + exchange_commission,
+            'Комиссия': (broker_commission + exchange_commission).quantize(Decimal('0.01')),
             'Валюта комиссии': 'USD',
             'Дата сделки': date_obj,
             'Расчеты': date_obj
