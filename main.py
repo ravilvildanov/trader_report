@@ -16,16 +16,18 @@ def main():
     """Основная функция."""
     import argparse
     
-    parser = argparse.ArgumentParser(description='Обработка брокерских отчётов и курсов валют')
+    parser = argparse.ArgumentParser(description='Обработка брокерских отчётов')
     parser.add_argument('broker', type=Path, help='Путь к брокерскому отчёту (.xlsx)')
-    parser.add_argument('rates', type=Path, help='Путь к файлу курсов (.xlsx)')
     parser.add_argument('previous', type=Path, nargs='?', help='Путь к отчёту за прошлый период (.xlsx)')
     parser.add_argument('--out', type=Path, default=Path('.'), help='Папка для сохранения результатов')
     
     args = parser.parse_args()
     
+    # Используем фиксированный файл курсов валют
+    rates_path = Path('USD_01_01_2021_31_12_2024.xlsx')
+    
     # Создаём и запускаем процессор
-    processor = TradeReportProcessor(args.broker, args.rates)
+    processor = TradeReportProcessor(args.broker, rates_path)
     processor.process()
     
     # Обрабатываем отрицательный остаток
