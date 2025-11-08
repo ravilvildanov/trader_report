@@ -81,11 +81,12 @@ def main():
             help="Загрузите Excel или PDF файл с брокерским отчётом"
         )
         
-        # Загрузка отчёта за прошлый период (опционально)
-        previous_file = st.file_uploader(
-            "Отчёт за прошлый период (опционально)",
+        # Загрузка отчётов за прошлый период (опционально)
+        previous_files = st.file_uploader(
+            "Отчёты за прошлый период (опционально)",
             type=['xlsx', 'pdf'],
-            help="Загрузите Excel файл с отчётом за прошлый период для покрытия отрицательного сальдо"
+            accept_multiple_files=True,
+            help="Загрузите один или несколько Excel/PDF файлов с отчётами за прошлый период для покрытия отрицательного сальдо"
         )
         
         # Настройки
@@ -131,16 +132,23 @@ def main():
                 # Используем фиксированный файл курсов валют
                 rates_path = Path('USD_01_01_2021_31_12_2024.xlsx')
                 
-                # Сохраняем файл прошлого периода если есть
-                previous_path = None
-                if previous_file:
-                    previous_path = temp_path / previous_file.name
-                    with open(previous_path, 'wb') as f:
-                        f.write(previous_file.getvalue())
+                # Сохраняем файлы прошлого периода если есть
+                previous_paths = []
+                if previous_files:
+                    for previous_file in previous_files:
+                        previous_path = temp_path / previous_file.name
+                        with open(previous_path, 'wb') as f:
+                            f.write(previous_file.getvalue())
+                        previous_paths.append(previous_path)
                 
                 # Обрабатываем отчёты
                 with st.spinner("Обработка отчётов..."):
-                    processor = TradeReportProcessor(broker_path, rates_path)
+                    processor = TradeReportProcessor(
+                        broker_path, 
+                        rates_path,
+                        currency=currency, 
+                        previous_paths=previous_paths
+                    )
                     
                     # Основная обработка
                     processor.process()
@@ -169,13 +177,15 @@ def display_results(processor, output_dir):
     st.success("✅ Обработка завершена успешно!")
     
     # Вкладки для разных типов данных
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "trades_df", 
         "rates_df", 
         "trades_in_rub_df",
         "calculated_securities_df",
         "securities_df",
-        "securities_differences_df"
+        "merged_securities_df",
+        "insufficient_tickers",
+        "previous_trades_df"
     ])
     
     with tab1:
@@ -239,16 +249,22 @@ def display_results(processor, output_dir):
             st.warning("Нет данных для отображения")
 
     with tab6:
-        st.header("securities_differences_df")
+        st.header("merged_securities_df")
         
-        if not processor.securities_differences_df.empty:
-            st.dataframe(
-                processor.securities_differences_df,
-                use_container_width=True,
-                hide_index=False
-            )
+        if not processor.merged_securities_df.empty:
+            st.dataframe(processor.merged_securities_df)
         else:
             st.warning("Нет данных для отображения")
+
+    with tab7:
+        st.header("insufficient_tickers")
+
+        st.dataframe(processor.insufficient_tickers)
+
+    with tab8:
+        st.header("previous_trades_df")
+
+        st.dataframe(processor.previous_trades_df)
 
 def show_demo_content():
     """Показывает демонстрационный контент"""
@@ -259,7 +275,7 @@ def show_demo_content():
     
     ### 📋 Что нужно сделать:
     1. **Загрузите брокерский отчёт** - Excel или PDF файл с вашими сделками
-    2. **Опционально** - загрузите отчёт за прошлый период для корректного расчёта
+    2. **Опционально** - загрузите один или несколько отчётов за прошлый период для корректного расчёта
     3. **Нажмите "Обработать отчёты"** и получите результаты
     
     ### ✨ Возможности:

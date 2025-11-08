@@ -147,7 +147,7 @@ class PDFDataLoader(DataLoader):
             logger.warning('Не удалось распарсить строку: %s. Ошибка: %s', line, e)
             return None
     
-    def _create_trade_record(self, parts: list) -> Dict[str, Any]:
+    def _create_trade_record(self, parts: list) -> Optional[Dict[str, Any]]:
         """Создаёт запись о сделке из частей строки."""
         ticker = parts[0]
         operation = self._normalize_operation(parts[1])
@@ -164,6 +164,10 @@ class PDFDataLoader(DataLoader):
         
         # Примечание - это всё что между комиссией и путём
         note = ' '.join(parts[7:-4])
+        
+        # Пропускаем сделки с примечанием "Batch transfer TFOS"
+        if "Batch transfer TFOS" in note:
+            return None
         
         # Парсим дату и время
         date_part, time_part = date_time.split(' ')
