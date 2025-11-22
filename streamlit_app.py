@@ -177,7 +177,7 @@ def display_results(processor, output_dir):
     st.success("✅ Обработка завершена успешно!")
     
     # Вкладки для разных типов данных
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
         "trades_df", 
         "rates_df", 
         "trades_in_rub_df",
@@ -185,7 +185,8 @@ def display_results(processor, output_dir):
         "securities_df",
         "merged_securities_df",
         "insufficient_tickers",
-        "previous_trades_df"
+        "previous_trades_df",
+        "previous_selected_trades_df"
     ])
     
     with tab1:
@@ -265,6 +266,10 @@ def display_results(processor, output_dir):
         st.header("previous_trades_df")
 
         st.dataframe(processor.previous_trades_df)
+
+    with tab9:
+        st.header("previous_selected_trades_df")
+        st.dataframe(processor.previous_selected_trades_df)
 
 def show_demo_content():
     """Показывает демонстрационный контент"""

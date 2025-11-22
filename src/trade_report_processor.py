@@ -45,6 +45,7 @@ class TradeReportProcessor:
         self.merged_securities_df = pd.DataFrame()
         self.insufficient_tickers = pd.DataFrame()
         self.previous_trades_df = pd.DataFrame()
+        self.previous_selected_trades_df = pd.DataFrame()
     
     def process(self):
         """Основной метод обработки."""
@@ -95,8 +96,84 @@ class TradeReportProcessor:
 
     def _handle_previous_trades_if_needed(self):
         """Обрабатывает сделки из прошлого периода при необходимости"""
+        self.previous_selected_trades_df = pd.DataFrame()
+
         if not self.insufficient_tickers.empty and self.previous_paths:
+            # Загружаем предыдущие сделки
             self.previous_trades_df = self.previousTradesManager.loadTrades(self.previous_paths)
+
+            # Нормализуем операции в предыдущих сделках
+            if not self.previous_trades_df.empty:
+                self.previous_trades_df = self.trade_data_processor.normalize_operations(
+                    self.previous_trades_df
+                )
+
+            # Обрабатываем каждую бумагу из insufficient_tickers
+            if not self.previous_trades_df.empty:
+                self.previous_selected_trades_df = self._process_previous_trades_for_insufficient_tickers()
+    
+    def _process_previous_trades_for_insufficient_tickers(self):
+        """Обрабатывает предыдущие сделки для бумаг с недостаточными данными"""
+        selected_records = []
+
+        for _, row in self.insufficient_tickers.iterrows():
+            ticker = row['Тикер']
+            calculated_balance = pd.to_numeric(row['Вычисленный_остаток'], errors='coerce')
+            end_balance = pd.to_numeric(row['На конец'], errors='coerce')
+            
+            # Вычисляем нужную сумму: по модулю "Вычисленный_остаток" и "На конец"
+            needed_amount = abs(calculated_balance) if pd.notna(calculated_balance) else 0
+            if pd.notna(end_balance):
+                needed_amount += abs(end_balance)
+            
+            if needed_amount == 0:
+                logger.debug('Для тикера %s не требуется дополнительных покупок', ticker)
+                continue
+            
+            # Фильтруем покупки по тикеру
+            ticker_trades = self.previous_trades_df[
+                (self.previous_trades_df['Тикер'] == ticker) &
+                (self.previous_trades_df['Операция'] == 'Покупка')
+            ].copy()
+            
+            if ticker_trades.empty:
+                logger.debug('Не найдено покупок для тикера %s в предыдущих сделках', ticker)
+                continue
+            
+            # Сортируем по дате сделки по убыванию (от самой недавней к самой давней)
+            ticker_trades = ticker_trades.sort_values('Дата сделки', ascending=False).reset_index(drop=True)
+            
+            # Накапливаем количество покупок, пока не получится нужная сумма
+            accumulated_amount = 0
+            selected_trades = []
+            
+            for _, trade_row in ticker_trades.iterrows():
+                quantity = pd.to_numeric(trade_row['Количество'], errors='coerce')
+                if pd.isna(quantity) or quantity <= 0:
+                    continue
+                
+                accumulated_amount += quantity
+                selected_trades.append((trade_row, accumulated_amount))
+                
+                if accumulated_amount >= needed_amount:
+                    break
+            
+            if selected_trades:
+                logger.info('Для тикера %s найдено %d покупок на сумму %d (требуется %d)',
+                            ticker, len(selected_trades), accumulated_amount, needed_amount)
+
+                for order, (trade_row, accum_after_trade) in enumerate(selected_trades, start=1):
+                    record = trade_row.to_dict()
+                    record['Тикер из insufficient'] = ticker
+                    record['Требуемое количество'] = needed_amount
+                    record['Накоплено к этому шагу'] = accum_after_trade
+                    record['Порядок использования'] = order
+                    selected_records.append(record)
+
+        if not selected_records:
+            return pd.DataFrame()
+
+        return pd.DataFrame(selected_records)
 
     def save_reports(self, output_dir: Path):
         """Сохраняет все отчёты."""
