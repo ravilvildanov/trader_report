@@ -130,7 +130,7 @@ def main():
                     f.write(broker_file.getvalue())
                 
                 # Используем фиксированный файл курсов валют
-                rates_path = Path('RC_F01_01_2021_T25_11_2025.xlsx')
+                rates_path = Path('RC_F01_01_2023_T31_12_2025.xlsx')
                 
                 # Сохраняем файлы прошлого периода если есть
                 previous_paths = []
