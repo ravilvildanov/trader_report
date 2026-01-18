@@ -177,7 +177,8 @@ def display_results(processor, output_dir):
     st.success("✅ Обработка завершена успешно!")
     
     # Вкладки для разных типов данных
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
+        "💰 Финансовый результат",
         "trades_df", 
         "rates_df", 
         "trades_in_rub_df",
@@ -190,6 +191,71 @@ def display_results(processor, output_dir):
     ])
     
     with tab1:
+        st.header("💰 Финансовый результат")
+        
+        if not processor.finance_result_df.empty:
+            # Общая статистика
+            col1, col2, col3, col4 = st.columns(4)
+            
+            total_sales = processor.finance_result_df['Продажи (руб)'].sum()
+            total_purchases = processor.finance_result_df['Покупки (руб)'].sum()
+            total_commissions = processor.finance_result_df['Комиссии (руб)'].sum()
+            total_result = processor.finance_result_df['Финансовый результат (руб)'].sum()
+            
+            with col1:
+                st.metric("Общие продажи", f"{total_sales:,.2f} ₽")
+            with col2:
+                st.metric("Общие покупки", f"{total_purchases:,.2f} ₽")
+            with col3:
+                st.metric("Общие комиссии", f"{total_commissions:,.2f} ₽")
+            with col4:
+                st.metric(
+                    "Финансовый результат", 
+                    f"{total_result:,.2f} ₽",
+                    delta=f"{total_result:,.2f} ₽" if total_result != 0 else None
+                )
+            
+            st.markdown("---")
+            
+            # Таблица с результатами
+            st.subheader("Результаты по тикерам")
+            display_df = processor.finance_result_df.copy()
+            
+            # Форматируем числа для отображения
+            for col in ['Продажи (руб)', 'Покупки (руб)', 'Комиссии (руб)', 'Финансовый результат (руб)']:
+                if col in display_df.columns:
+                    display_df[col] = display_df[col].apply(lambda x: f"{x:,.2f}")
+            
+            st.dataframe(
+                display_df,
+                use_container_width=True,
+                hide_index=False
+            )
+            
+            # График финансового результата по тикерам
+            st.markdown("---")
+            st.subheader("График финансового результата по тикерам")
+            
+            fig = px.bar(
+                processor.finance_result_df,
+                x='Тикер',
+                y='Финансовый результат (руб)',
+                title='Финансовый результат по тикерам',
+                color='Финансовый результат (руб)',
+                color_continuous_scale=['red', 'yellow', 'green'],
+                labels={'Финансовый результат (руб)': 'Результат (₽)'}
+            )
+            fig.update_layout(
+                xaxis_title="Тикер",
+                yaxis_title="Финансовый результат (₽)",
+                height=500
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+        else:
+            st.warning("Нет данных для отображения")
+    
+    with tab2:
         st.header("trades_df")
         
         if not processor.trades_df.empty:
@@ -201,7 +267,7 @@ def display_results(processor, output_dir):
         else:
             st.warning("Нет данных для отображения")
     
-    with tab2:
+    with tab3:
         st.header("rates_df")
         
         if not processor.rates_df.empty:
@@ -213,7 +279,7 @@ def display_results(processor, output_dir):
         else:
             st.warning("Нет данных для отображения")
     
-    with tab3:
+    with tab4:
         st.header("trades_in_rub_df")
         
         if not processor.trades_in_rub_df.empty:
@@ -225,7 +291,7 @@ def display_results(processor, output_dir):
         else:
             st.warning("Нет данных для отображения")
     
-    with tab4:
+    with tab5:
         st.header("calculated_securities_df")
         
         if not processor.calculated_securities_df.empty:
@@ -237,7 +303,7 @@ def display_results(processor, output_dir):
         else:
             st.warning("Нет данных для отображения")
     
-    with tab5:
+    with tab6:
         st.header("securities_df")
         
         if not processor.securities_df.empty:
@@ -249,7 +315,7 @@ def display_results(processor, output_dir):
         else:
             st.warning("Нет данных для отображения")
 
-    with tab6:
+    with tab7:
         st.header("merged_securities_df")
         
         if not processor.merged_securities_df.empty:
@@ -257,17 +323,17 @@ def display_results(processor, output_dir):
         else:
             st.warning("Нет данных для отображения")
 
-    with tab7:
+    with tab8:
         st.header("insufficient_tickers")
 
         st.dataframe(processor.insufficient_tickers)
 
-    with tab8:
+    with tab9:
         st.header("previous_trades_df")
 
         st.dataframe(processor.previous_trades_df)
 
-    with tab9:
+    with tab10:
         st.header("previous_selected_trades_df")
         st.dataframe(processor.previous_selected_trades_df)
 

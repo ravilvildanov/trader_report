@@ -13,6 +13,7 @@ from .pdf_report_generator import PDFReportGenerator
 from .securities_loader import SecuritiesLoader
 from .SecuritiesMerger import SecuritiesMerger
 from .PreviousTradesManager import PreviousTradesManager
+from .finance_result_calculator import FinanceResultCalculator
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ class TradeReportProcessor:
         self.insufficient_tickers = pd.DataFrame()
         self.previous_trades_df = pd.DataFrame()
         self.previous_selected_trades_df = pd.DataFrame()
+        self.finance_result_df = pd.DataFrame()
     
     def process(self):
         """Основной метод обработки."""
@@ -53,6 +55,7 @@ class TradeReportProcessor:
         self._process_data()
         self._process_securities()
         self._handle_previous_trades_if_needed()
+        self._calculate_finance_result()
     
     def _load_data(self):
         """Загружает исходные данные."""
@@ -175,6 +178,38 @@ class TradeReportProcessor:
 
         return pd.DataFrame(selected_records)
 
+    def _calculate_finance_result(self):
+        """Рассчитывает финансовый результат по принципу FIFO/LIFO."""
+        if self.trades_in_rub_df.empty:
+            logger.warning('Нет данных для расчета финансового результата')
+            self.finance_result_df = pd.DataFrame()
+            return
+        
+        # Подготавливаем previous_trades_df для калькулятора
+        # Если previous_trades_df не пустой, нужно обработать его так же, как trades_in_rub_df
+        previous_trades_for_calc = pd.DataFrame()
+        if not self.previous_trades_df.empty:
+            # Объединяем с курсами валют
+            merged_previous = self.trade_data_processor.merge_with_rates(
+                self.previous_trades_df, 
+                self.rates_df
+            )
+            # Вычисляем суммы в рублях
+            previous_trades_for_calc = self.trade_data_processor.calculate_rub_amounts(merged_previous)
+        
+        # Создаем калькулятор и рассчитываем результат
+        calculator = FinanceResultCalculator(
+            trades_in_rub_df=self.trades_in_rub_df,
+            previous_trades_df=previous_trades_for_calc if not previous_trades_for_calc.empty else None
+        )
+        
+        self.finance_result_df = calculator.calculate()
+        
+        if not self.finance_result_df.empty:
+            logger.info('Рассчитан финансовый результат для %d тикеров', len(self.finance_result_df))
+        else:
+            logger.warning('Не удалось рассчитать финансовый результат')
+
     def save_reports(self, output_dir: Path):
         """Сохраняет все отчёты."""
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -182,6 +217,8 @@ class TradeReportProcessor:
         # Сохраняем CSV файлы
         self.trades_in_rub_df.to_csv(output_dir / 'details.csv', index=False)
         self.calculated_securities_df.to_csv(output_dir / 'calculated_securities.csv', index=False)
+        if not self.finance_result_df.empty:
+            self.finance_result_df.to_csv(output_dir / 'finance_result.csv', index=False)
         
         # Генерируем PDF отчёт
         # self.pdf_generator.generate_closed_positions_report(
