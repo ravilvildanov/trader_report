@@ -194,6 +194,42 @@ def display_results(processor, output_dir):
         st.header("💰 Финансовый результат")
         
         if not processor.finance_result_df.empty:
+            # Проверка расхождений в остатках
+            if processor.balance_discrepancies:
+                st.warning(f"⚠️ Обнаружено расхождений в остатках: {len(processor.balance_discrepancies)} тикер(ов)")
+                
+                for discrepancy in processor.balance_discrepancies:
+                    ticker = discrepancy['ticker']
+                    calculated = discrepancy['calculated']
+                    real = discrepancy['real']
+                    difference = discrepancy['difference']
+                    
+                    # Определяем цвет и текст в зависимости от типа расхождения
+                    if calculated < real:
+                        # Вычисленный остаток меньше реального - возможно не все продажи учтены
+                        message = f"**{ticker}**: Вычисленный остаток ({calculated:.2f}) меньше реального ({real:.2f}) на {abs(difference):.2f}. " \
+                                 f"Возможно, не все продажи или операции были учтены в текущем отчете."
+                    else:
+                        # Вычисленный остаток больше реального - не хватает покупок из прошлого
+                        message = f"**{ticker}**: Вычисленный остаток ({calculated:.2f}) больше реального ({real:.2f}) на {abs(difference):.2f}. " \
+                                 f"Скорее всего, необходимо загрузить отчеты за предыдущие периоды для корректного расчета покупок."
+                    
+                    st.markdown(f":orange[{message}]")
+                
+                st.markdown("---")
+            
+            # Проверка сплитов
+            if processor.splits_detector.tickers_with_splits:
+                st.warning(f"⚠️ Обнаружены сплиты: {len(processor.splits_detector.tickers_with_splits)} тикер(ов)")
+                
+                for ticker in processor.splits_detector.tickers_with_splits:
+                    message = f"**{ticker}**: Для данного тикера был выполнен сплит акций. " \
+                             f"Это может привести к ошибкам в расчетах количества и цен. " \
+                             f"Рекомендуется проверить корректность данных вручную."
+                    st.markdown(f":orange[{message}]")
+                
+                st.markdown("---")
+            
             # Общая статистика
             col1, col2, col3, col4 = st.columns(4)
             
@@ -222,6 +258,12 @@ def display_results(processor, output_dir):
             display_df = processor.finance_result_df.copy()
             
             # Форматируем числа для отображения
+            # Количество - целые числа
+            for col in ['Продажи (количество)', 'Покупки (количество)', 'Остаток количества']:
+                if col in display_df.columns:
+                    display_df[col] = display_df[col].apply(lambda x: f"{x:,.0f}")
+            
+            # Суммы в рублях - с копейками
             for col in ['Продажи (руб)', 'Покупки (руб)', 'Комиссии (руб)', 'Финансовый результат (руб)']:
                 if col in display_df.columns:
                     display_df[col] = display_df[col].apply(lambda x: f"{x:,.2f}")
@@ -251,6 +293,46 @@ def display_results(processor, output_dir):
                 height=500
             )
             st.plotly_chart(fig, use_container_width=True)
+            
+            # Детальные сделки по тикерам
+            st.markdown("---")
+            st.subheader("📋 Детальные сделки по тикерам")
+            st.caption("Раскройте тикер, чтобы увидеть все сделки, использованные для расчета")
+            
+            if processor.finance_calculator:
+                for _, row in processor.finance_result_df.iterrows():
+                    ticker = row['Тикер']
+                    trades_details = processor.finance_calculator.get_trades_details(ticker)
+                    
+                    with st.expander(f"🔍 {ticker} - детали сделок"):
+                        # Текущие сделки
+                        st.write("**Текущие сделки:**")
+                        current_trades = trades_details['current_trades']
+                        if not current_trades.empty:
+                            # Выбираем только важные колонки для отображения
+                            display_cols = ['Дата сделки', 'Операция', 'Количество', 'Цена', 
+                                          'Сумма в руб', 'Комиссия брокера руб']
+                            available_cols = [col for col in display_cols if col in current_trades.columns]
+                            st.dataframe(
+                                current_trades[available_cols],
+                                use_container_width=True,
+                                hide_index=True
+                            )
+                        else:
+                            st.info("Нет текущих сделок")
+                        
+                        # Сделки из предыдущего периода
+                        previous_trades = trades_details['previous_trades']
+                        if not previous_trades.empty:
+                            st.write("**Сделки из предыдущего периода (использованные по LIFO):**")
+                            display_cols = ['Дата сделки', 'Операция', 'Количество', 'Цена', 
+                                          'Сумма в руб', 'Комиссия брокера руб']
+                            available_cols = [col for col in display_cols if col in previous_trades.columns]
+                            st.dataframe(
+                                previous_trades[available_cols],
+                                use_container_width=True,
+                                hide_index=True
+                            )
             
         else:
             st.warning("Нет данных для отображения")

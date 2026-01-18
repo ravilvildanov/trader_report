@@ -20,6 +20,7 @@ class FinanceResultCalculator:
         self.trades_in_rub_df = trades_in_rub_df.copy() if not trades_in_rub_df.empty else pd.DataFrame()
         self.previous_trades_df = previous_trades_df.copy() if previous_trades_df is not None and not previous_trades_df.empty else pd.DataFrame()
         self.result_df = pd.DataFrame()
+        self.trades_details = {}  # Словарь с детальными сделками по каждому тикеру
     
     def calculate(self) -> pd.DataFrame:
         """
@@ -49,6 +50,21 @@ class FinanceResultCalculator:
         self.result_df = pd.DataFrame(results)
         return self.result_df
     
+    def get_trades_details(self, ticker: str) -> dict:
+        """
+        Получает детальную информацию о сделках для указанного тикера.
+        
+        Args:
+            ticker: Тикер для получения деталей
+            
+        Returns:
+            Словарь с ключами 'current_trades' и 'previous_trades' (DataFrames)
+        """
+        return self.trades_details.get(ticker, {
+            'current_trades': pd.DataFrame(),
+            'previous_trades': pd.DataFrame()
+        })
+    
     def _calculate_ticker_result(self, ticker: str) -> Optional[dict]:
         """
         Рассчитывает финансовый результат для одного тикера.
@@ -69,6 +85,12 @@ class FinanceResultCalculator:
         
         # Сортируем по дате сделки (FIFO - сначала старые)
         ticker_trades = ticker_trades.sort_values('Дата сделки', ascending=True).reset_index(drop=True)
+        
+        # Сохраняем сделки для этого тикера (для детального просмотра)
+        self.trades_details[ticker] = {
+            'current_trades': ticker_trades,
+            'previous_trades': pd.DataFrame()
+        }
         
         # Инициализируем переменные для расчета
         total_sales = Decimal('0')  # Общая сумма продаж
@@ -98,7 +120,11 @@ class FinanceResultCalculator:
         remaining_quantity = total_purchase_quantity - total_sale_quantity
         if remaining_quantity < 0 and not self.previous_trades_df.empty:
             needed_quantity = abs(remaining_quantity)
-            previous_purchases = self._get_previous_purchases_lifo(ticker, needed_quantity)
+            previous_purchases, previous_trades_used = self._get_previous_purchases_lifo(ticker, needed_quantity)
+            
+            # Сохраняем использованные сделки из предыдущего периода
+            if not previous_trades_used.empty:
+                self.trades_details[ticker]['previous_trades'] = previous_trades_used
             
             # Подсчитываем общее количество использованных покупок из предыдущих сделок
             used_previous_quantity = Decimal('0')
@@ -116,13 +142,15 @@ class FinanceResultCalculator:
         return {
             'Тикер': ticker,
             'Продажи (руб)': float(total_sales),
+            'Продажи (количество)': float(total_sale_quantity),
             'Покупки (руб)': float(total_purchases),
+            'Покупки (количество)': float(total_purchase_quantity),
             'Комиссии (руб)': float(total_commissions),
             'Финансовый результат (руб)': float(financial_result),
             'Остаток количества': float(remaining_quantity)
         }
     
-    def _get_previous_purchases_lifo(self, ticker: str, needed_quantity: Decimal) -> list:
+    def _get_previous_purchases_lifo(self, ticker: str, needed_quantity: Decimal) -> tuple:
         """
         Получает покупки из предыдущих сделок по принципу LIFO.
         
@@ -131,10 +159,10 @@ class FinanceResultCalculator:
             needed_quantity: Необходимое количество
             
         Returns:
-            Список словарей с информацией о покупках
+            Кортеж: (список словарей с информацией о покупках, DataFrame с использованными сделками)
         """
         if self.previous_trades_df.empty:
-            return []
+            return [], pd.DataFrame()
         
         # Фильтруем покупки по тикеру
         previous_purchases = self.previous_trades_df[
@@ -143,16 +171,17 @@ class FinanceResultCalculator:
         ].copy()
         
         if previous_purchases.empty:
-            return []
+            return [], pd.DataFrame()
         
         # Сортируем по дате сделки по убыванию (LIFO - сначала новые)
         previous_purchases = previous_purchases.sort_values('Дата сделки', ascending=False).reset_index(drop=True)
         
         purchases_used = []
+        trades_used_indices = []
         remaining_needed = needed_quantity
         
         # Берем покупки начиная с самых новых (LIFO)
-        for _, purchase in previous_purchases.iterrows():
+        for idx, purchase in previous_purchases.iterrows():
             if remaining_needed <= 0:
                 break
             
@@ -189,9 +218,13 @@ class FinanceResultCalculator:
                 'date': purchase.get('Дата сделки', None)
             })
             
+            trades_used_indices.append(idx)
             remaining_needed -= quantity_to_use
         
         logger.info('Для тикера %s использовано %d покупок из предыдущих сделок (LIFO), количество: %s',
                    ticker, len(purchases_used), needed_quantity - remaining_needed)
         
-        return purchases_used
+        # Формируем DataFrame с использованными сделками
+        trades_used_df = previous_purchases.iloc[trades_used_indices].copy() if trades_used_indices else pd.DataFrame()
+        
+        return purchases_used, trades_used_df
